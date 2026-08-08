@@ -1,41 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const API = "/api/tasks";
+const API = "https://todo-app-syqd.onrender.com/api/tasks";
+const CATEGORIES_API = "https://todo-app-syqd.onrender.com/api/categories";
 
-const PRIORITY_LABEL = { high: "High", medium: "Med", low: "Low" };
+const PRIORITY_LABEL = {
+  high: "High",
+  medium: "Med",
+  low: "Low",
+};
 
 function Check({ done }) {
   return (
-    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
-      <rect
-        x="1.5"
-        y="1.5"
-        width="17"
-        height="17"
-        rx="2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-      {done && (
-        <path
-          d="M4.5 10.2 L8.2 14 L15.5 5.8"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      )}
-    </svg>
+    <span className={`check ${done ? "checked" : ""}`}>
+      {done && "✓"}
+    </span>
   );
 }
 
 function formatDue(dateStr) {
   if (!dateStr) return null;
+
   const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default function App() {
@@ -56,47 +47,76 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Load tasks and categories when app starts
   useEffect(() => {
     fetchTasks();
     fetchCategories();
   }, []);
 
+  // Dark mode
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  // =========================
+  // GET TASKS
+  // =========================
   async function fetchTasks() {
     try {
       setLoading(true);
+
       const res = await fetch(API);
-      if (!res.ok) throw new Error("Could not load the ledger.");
-      setTasks(await res.json());
+
+      if (!res.ok) {
+        throw new Error("Could not load the tasks.");
+      }
+
+      const data = await res.json();
+
+      setTasks(data);
       setError(null);
     } catch (e) {
+      console.error(e);
       setError(e.message);
     } finally {
       setLoading(false);
     }
   }
 
+  // =========================
+  // GET CATEGORIES
+  // =========================
   async function fetchCategories() {
     try {
-      const res = await fetch("/api/categories");
-      if (res.ok) setCategories(await res.json());
-    } catch {
-      // non-critical; ignore
+      const res = await fetch(CATEGORIES_API);
+
+      if (res.ok) {
+        const data = await res.json();
+        setCategories(data);
+      }
+    } catch (e) {
+      console.log("Categories could not be loaded.");
     }
   }
 
+  // =========================
+  // ADD TASK
+  // =========================
   async function addTask(e) {
     e.preventDefault();
+
     const title = draft.trim();
+
     if (!title) return;
+
     setDraft("");
+
     try {
       const res = await fetch(API, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           title,
           priority: draftPriority,
@@ -104,204 +124,393 @@ export default function App() {
           due_date: draftDue || null,
         }),
       });
-      if (!res.ok) throw new Error("Could not add the entry.");
-      const created = await res.json();
-      setTasks((prev) => [created, ...prev]);
-      setDraftDue("");
-      if (draftCategory.trim() && !categories.includes(draftCategory.trim())) {
-        setCategories((prev) => [...prev, draftCategory.trim()].sort());
+
+      if (!res.ok) {
+        throw new Error("Could not add the task.");
       }
+
+      const created = await res.json();
+
+      setTasks((prev) => [created, ...prev]);
+
+      setDraftDue("");
+
+      if (
+        draftCategory.trim() &&
+        !categories.includes(draftCategory.trim())
+      ) {
+        setCategories((prev) =>
+          [...prev, draftCategory.trim()].sort()
+        );
+      }
+
+      setDraftCategory("");
+      setError(null);
     } catch (e) {
+      console.error(e);
       setError(e.message);
     }
   }
 
+  // =========================
+  // TOGGLE TASK
+  // =========================
   async function toggleTask(task) {
+    const newDone = !task.done;
+
+    // Optimistic UI update
     setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t))
+      prev.map((t) =>
+        t.id === task.id
+          ? { ...t, done: newDone }
+          : t
+      )
     );
+
     try {
       const res = await fetch(`${API}/${task.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ done: !task.done }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          done: newDone,
+        }),
       });
-      if (!res.ok) throw new Error("Could not update the entry.");
+
+      if (!res.ok) {
+        throw new Error("Could not update the task.");
+      }
+
+      setError(null);
     } catch (e) {
+      console.error(e);
       setError(e.message);
       fetchTasks();
     }
   }
 
+  // =========================
+  // CHANGE PRIORITY
+  // =========================
   async function cyclePriority(task) {
     const order = ["low", "medium", "high"];
-    const next = order[(order.indexOf(task.priority) + 1) % order.length];
+
+    const currentIndex = order.indexOf(task.priority);
+
+    const next =
+      order[(currentIndex + 1) % order.length];
+
+    // Optimistic update
     setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, priority: next } : t))
+      prev.map((t) =>
+        t.id === task.id
+          ? { ...t, priority: next }
+          : t
+      )
     );
+
     try {
       const res = await fetch(`${API}/${task.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ priority: next }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          priority: next,
+        }),
       });
-      if (!res.ok) throw new Error("Could not update priority.");
+
+      if (!res.ok) {
+        throw new Error("Could not update priority.");
+      }
+
+      setError(null);
     } catch (e) {
+      console.error(e);
       setError(e.message);
       fetchTasks();
     }
   }
 
+  // =========================
+  // DELETE TASK
+  // =========================
   async function removeTask(id) {
-    const prev = tasks;
-    setTasks((cur) => cur.filter((t) => t.id !== id));
+    const previousTasks = tasks;
+
+    setTasks((current) =>
+      current.filter((task) => task.id !== id)
+    );
+
     try {
-      const res = await fetch(`${API}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Could not remove the entry.");
+      const res = await fetch(`${API}/${id}`, {
+        method: "DELETE",
+      });
+
+      if (!res.ok) {
+        throw new Error("Could not remove the task.");
+      }
+
+      setError(null);
     } catch (e) {
+      console.error(e);
       setError(e.message);
-      setTasks(prev);
+      setTasks(previousTasks);
     }
   }
 
+  // =========================
+  // FILTER + SEARCH + SORT
+  // =========================
   const visible = useMemo(() => {
     let list = tasks;
 
-    if (filter === "open") list = list.filter((t) => !t.done);
-    else if (filter === "done") list = list.filter((t) => t.done);
+    // Open / All / Done
+    if (filter === "open") {
+      list = list.filter((t) => !t.done);
+    } else if (filter === "done") {
+      list = list.filter((t) => t.done);
+    }
 
-    if (categoryFilter) list = list.filter((t) => t.category === categoryFilter);
+    // Category
+    if (categoryFilter) {
+      list = list.filter(
+        (t) => t.category === categoryFilter
+      );
+    }
 
+    // Search
     const q = search.trim().toLowerCase();
-    if (q) list = list.filter((t) => t.title.toLowerCase().includes(q));
 
+    if (q) {
+      list = list.filter((t) =>
+        t.title.toLowerCase().includes(q)
+      );
+    }
+
+    // Sort
     const sorted = [...list];
+
     if (sort === "priority") {
-      const rank = { high: 0, medium: 1, low: 2 };
-      sorted.sort((a, b) => rank[a.priority] - rank[b.priority]);
+      const rank = {
+        high: 0,
+        medium: 1,
+        low: 2,
+      };
+
+      sorted.sort(
+        (a, b) =>
+          rank[a.priority] - rank[b.priority]
+      );
     } else if (sort === "due_date") {
       sorted.sort((a, b) => {
         if (!a.due_date) return 1;
         if (!b.due_date) return -1;
-        return a.due_date.localeCompare(b.due_date);
+
+        return a.due_date.localeCompare(
+          b.due_date
+        );
       });
     } else if (sort === "title") {
-      sorted.sort((a, b) => a.title.localeCompare(b.title));
+      sorted.sort((a, b) =>
+        a.title.localeCompare(b.title)
+      );
     } else {
+      // Newest first
       sorted.sort((a, b) => b.id - a.id);
     }
+
     return sorted;
-  }, [tasks, filter, categoryFilter, search, sort]);
+  }, [
+    tasks,
+    filter,
+    categoryFilter,
+    search,
+    sort,
+  ]);
 
-  const openCount = tasks.filter((t) => !t.done).length;
+  const openCount = tasks.filter(
+    (t) => !t.done
+  ).length;
 
+  // =========================
+  // UI
+  // =========================
   return (
-    <main className="sheet">
-      <header className="sheet-head">
-        <div className="head-row">
-          <div>
-            <p className="eyebrow">TaskLine — daily entries</p>
-            <h1>Today's List</h1>
-          </div>
-          <button
-            className="theme-toggle"
-            onClick={() => setDark((d) => !d)}
-            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-            title={dark ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {dark ? "☀" : "☾"}
-          </button>
+    <main className="app">
+      <header className="header">
+        <div>
+          <h1>TaskLine — daily entries</h1>
+          <p>Today's List</p>
         </div>
-        <p className="tally">
-          {openCount} open · {tasks.length} total
-        </p>
+
+        <button
+          className="theme-toggle"
+          onClick={() =>
+            setDark((d) => !d)
+          }
+          aria-label={
+            dark
+              ? "Switch to light mode"
+              : "Switch to dark mode"
+          }
+          title={
+            dark
+              ? "Switch to light mode"
+              : "Switch to dark mode"
+          }
+        >
+          {dark ? "☀" : "☾"}
+        </button>
       </header>
 
-      <form className="entry-form" onSubmit={addTask}>
+      <div className="stats">
+        {openCount} open · {tasks.length} total
+      </div>
+
+      {/* ADD TASK */}
+      <form
+        className="entry-form"
+        onSubmit={addTask}
+      >
         <input
           className="title-input"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) =>
+            setDraft(e.target.value)
+          }
           placeholder="Log a new task…"
           aria-label="New task"
         />
+
         <select
           className="priority-select"
           value={draftPriority}
-          onChange={(e) => setDraftPriority(e.target.value)}
+          onChange={(e) =>
+            setDraftPriority(e.target.value)
+          }
           aria-label="Priority"
         >
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
         </select>
-        <button type="submit" disabled={!draft.trim()}>
+
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+        >
           Add
         </button>
       </form>
 
+      {/* CATEGORY + DATE */}
       <div className="entry-form-secondary">
         <input
           className="category-input"
           value={draftCategory}
-          onChange={(e) => setDraftCategory(e.target.value)}
+          onChange={(e) =>
+            setDraftCategory(e.target.value)
+          }
           placeholder="Category (optional)"
           list="category-options"
           aria-label="Category"
         />
+
         <datalist id="category-options">
-          {categories.map((c) => (
-            <option key={c} value={c} />
+          {categories.map((category) => (
+            <option
+              key={category}
+              value={category}
+            />
           ))}
         </datalist>
+
         <input
           className="date-input"
           type="date"
           value={draftDue}
-          onChange={(e) => setDraftDue(e.target.value)}
+          onChange={(e) =>
+            setDraftDue(e.target.value)
+          }
           aria-label="Due date"
         />
       </div>
 
+      {/* SEARCH + SORT */}
       <div className="toolbar">
         <input
           className="search-input"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) =>
+            setSearch(e.target.value)
+          }
           placeholder="Search entries…"
           aria-label="Search tasks"
         />
+
         <select
           className="category-filter"
           value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
+          onChange={(e) =>
+            setCategoryFilter(e.target.value)
+          }
           aria-label="Filter by category"
         >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          <option value="">
+            All categories
+          </option>
+
+          {categories.map((category) => (
+            <option
+              key={category}
+              value={category}
+            >
+              {category}
             </option>
           ))}
         </select>
+
         <select
           className="sort-select"
           value={sort}
-          onChange={(e) => setSort(e.target.value)}
+          onChange={(e) =>
+            setSort(e.target.value)
+          }
           aria-label="Sort by"
         >
-          <option value="created">Newest</option>
-          <option value="priority">Priority</option>
-          <option value="due_date">Due date</option>
-          <option value="title">Title</option>
+          <option value="created">
+            Newest
+          </option>
+
+          <option value="priority">
+            Priority
+          </option>
+
+          <option value="due_date">
+            Due date
+          </option>
+
+          <option value="title">
+            Title
+          </option>
         </select>
       </div>
 
-      <nav className="filters" aria-label="Filter tasks">
+      {/* FILTERS */}
+      <nav
+        className="filters"
+        aria-label="Filter tasks"
+      >
         {["open", "all", "done"].map((f) => (
           <button
             key={f}
-            className={filter === f ? "filter active" : "filter"}
+            className={
+              filter === f
+                ? "filter active"
+                : "filter"
+            }
             onClick={() => setFilter(f)}
           >
             {f}
@@ -309,56 +518,108 @@ export default function App() {
         ))}
       </nav>
 
-      {error && <p className="error">{error}</p>}
+      {/* ERROR */}
+      {error && (
+        <p className="error">
+          {error}
+        </p>
+      )}
 
+      {/* TASK LIST */}
       <ul className="ledger">
-        {loading && <li className="empty">Reading the ledger…</li>}
-
-        {!loading && visible.length === 0 && (
+        {loading && (
           <li className="empty">
-            {filter === "done"
-              ? "Nothing crossed off yet."
-              : "Nothing logged. Add the first line above."}
+            Reading the ledger…
           </li>
         )}
 
         {!loading &&
+          visible.length === 0 && (
+            <li className="empty">
+              {filter === "done"
+                ? "Nothing crossed off yet."
+                : "Nothing logged. Add the first line above."}
+            </li>
+          )}
+
+        {!loading &&
           visible.map((task) => (
-            <li key={task.id} className={task.done ? "row done" : "row"}>
+            <li
+              key={task.id}
+              className={
+                task.done
+                  ? "row done"
+                  : "row"
+              }
+            >
+              {/* CHECK */}
               <button
                 className="check-btn"
-                onClick={() => toggleTask(task)}
+                onClick={() =>
+                  toggleTask(task)
+                }
                 aria-pressed={task.done}
-                aria-label={task.done ? "Mark as open" : "Mark as done"}
+                aria-label={
+                  task.done
+                    ? "Mark as open"
+                    : "Mark as done"
+                }
               >
                 <Check done={task.done} />
               </button>
 
+              {/* TASK DETAILS */}
               <div className="row-main">
-                <span className="title">{task.title}</span>
+                <span className="title">
+                  {task.title}
+                </span>
+
                 <div className="meta">
                   {task.category && (
-                    <span className="chip category-chip">{task.category}</span>
+                    <span className="chip category-chip">
+                      {task.category}
+                    </span>
                   )}
+
                   {task.due_date && (
-                    <span className={task.overdue ? "chip due-chip overdue" : "chip due-chip"}>
-                      {task.overdue ? "Overdue " : "Due "}
-                      {formatDue(task.due_date)}
+                    <span
+                      className={
+                        task.overdue
+                          ? "chip due-chip overdue"
+                          : "chip due-chip"
+                      }
+                    >
+                      {task.overdue
+                        ? "Overdue "
+                        : "Due "}
+
+                      {formatDue(
+                        task.due_date
+                      )}
                     </span>
                   )}
                 </div>
               </div>
 
+              {/* PRIORITY */}
               <button
                 className={`priority-tag priority-${task.priority}`}
-                onClick={() => cyclePriority(task)}
+                onClick={() =>
+                  cyclePriority(task)
+                }
                 title="Click to change priority"
               >
-                {PRIORITY_LABEL[task.priority]}
+                {PRIORITY_LABEL[
+                  task.priority
+                ] || task.priority}
               </button>
+
+              {/* DELETE */}
               <button
                 className="remove-btn"
-                onClick={() => removeTask(task.id)}
+                onClick={() =>
+                  removeTask(task.id)
+                }
                 aria-label={`Remove "${task.title}"`}
               >
                 ✕
