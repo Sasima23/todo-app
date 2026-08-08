@@ -1,0 +1,56 @@
+:root {
+  --paper: #f6f3ea;
+  --paper-line: #ddd6c2;
+  --ink: #24312a;
+  --ink-soft: #5b6a5f;
+  --rule-red: #a8453a;
+  --accent-green: #5b7a63;
+  --done-gray: #9b9787;
+  --input-bg: #fffdf8;
+
+  --font-display: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", monospace;
+}
+
+html.dark {
+  --paper: #1c211d;
+  --paper-line: #39423a;
+  --ink: #ece7d8;
+  --ink-soft: #a5ab9e;
+  --rule-red: #d97b6e;
+  --accent-green: #8fb59a;
+  --done-gray: #6f7669;
+  --input-bg: #242b25;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 48px 20px 80px;
+}
+
+button {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
