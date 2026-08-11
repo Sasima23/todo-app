@@ -1,3 +1,4 @@
+
 import os
 import sqlite3
 from datetime import date, datetime, timezone
@@ -6,25 +7,43 @@ from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "tasks.db")
+# --------------------------------------------------
+# App configuration
+# --------------------------------------------------
 
 app = Flask(__name__)
 CORS(app)
 
-VALID_PRIORITIES = {"low", "medium", "high"}
-PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
+DB_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "tasks.db"
+)
 
+VALID_PRIORITIES = {"low", "medium", "high"}
+
+PRIORITY_RANK = {
+    "high": 0,
+    "medium": 1,
+    "low": 2,
+}
+
+
+# --------------------------------------------------
+# Database
+# --------------------------------------------------
 
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
+
     return g.db
 
 
 @app.teardown_appcontext
 def close_db(exception=None):
     db = g.pop("db", None)
+
     if db is not None:
         db.close()
 
@@ -48,37 +67,52 @@ def init_db():
 
     db.commit()
 
-    cols = [
+    columns = {
         row[1]
-        for row in db.execute("PRAGMA table_info(tasks)")
-    ]
+        for row in db.execute(
+            "PRAGMA table_info(tasks)"
+        ).fetchall()
+    }
 
-    if "priority" not in cols:
+    if "priority" not in columns:
         db.execute(
-            "ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'"
+            """
+            ALTER TABLE tasks
+            ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium'
+            """
         )
 
-    if "category" not in cols:
+    if "category" not in columns:
         db.execute(
-            "ALTER TABLE tasks ADD COLUMN category TEXT NOT NULL DEFAULT ''"
+            """
+            ALTER TABLE tasks
+            ADD COLUMN category TEXT NOT NULL DEFAULT ''
+            """
         )
 
-    if "due_date" not in cols:
+    if "due_date" not in columns:
         db.execute(
-            "ALTER TABLE tasks ADD COLUMN due_date TEXT"
+            """
+            ALTER TABLE tasks
+            ADD COLUMN due_date TEXT
+            """
         )
 
     db.commit()
     db.close()
 
 
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
+
 def row_to_task(row):
-    due = row["due_date"]
+    due_date = row["due_date"]
 
     overdue = (
-        bool(due)
+        bool(due_date)
         and not bool(row["done"])
-        and due < date.today().isoformat()
+        and due_date < date.today().isoformat()
     )
 
     return {
@@ -87,15 +121,13 @@ def row_to_task(row):
         "done": bool(row["done"]),
         "priority": row["priority"],
         "category": row["category"],
-        "due_date": due,
+        "due_date": due_date,
         "overdue": overdue,
         "created_at": row["created_at"],
     }
 
 
 def parse_due_date(value):
-    """Return a validated YYYY-MM-DD string, or None."""
-
     if value in (None, ""):
         return None
 
@@ -109,7 +141,23 @@ def parse_due_date(value):
     return value
 
 
-@app.get("/api/tasks")
+# --------------------------------------------------
+# Home / health check
+# --------------------------------------------------
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "status": "ok",
+        "message": "Todo API is running"
+    })
+
+
+# --------------------------------------------------
+# Get all tasks
+# --------------------------------------------------
+
+@app.route("/api/tasks", methods=["GET"])
 def list_tasks():
     db = get_db()
 
@@ -117,9 +165,16 @@ def list_tasks():
         "SELECT * FROM tasks"
     ).fetchall()
 
-    tasks = [row_to_task(row) for row in rows]
+    tasks = [
+        row_to_task(row)
+        for row in rows
+    ]
 
-    q = request.args.get("q", "").strip().lower()
+    # Search
+    q = request.args.get(
+        "q",
+        ""
+    ).strip().lower()
 
     if q:
         tasks = [
@@ -128,8 +183,10 @@ def list_tasks():
             if q in task["title"].lower()
         ]
 
+    # Category
     category = request.args.get(
-        "category", ""
+        "category",
+        ""
     ).strip()
 
     if category:
@@ -139,8 +196,10 @@ def list_tasks():
             if task["category"] == category
         ]
 
+    # Status
     status = request.args.get(
-        "status", ""
+        "status",
+        ""
     ).strip()
 
     if status == "open":
@@ -157,14 +216,19 @@ def list_tasks():
             if task["done"]
         ]
 
+    # Sorting
     sort = request.args.get(
-        "sort", "created"
+        "sort",
+        "created"
     )
 
     if sort == "priority":
         tasks.sort(
             key=lambda task:
-            PRIORITY_RANK[task["priority"]]
+            PRIORITY_RANK.get(
+                task["priority"],
+                1
+            )
         )
 
     elif sort == "due_date":
@@ -183,51 +247,41 @@ def list_tasks():
 
     else:
         tasks.sort(
-            key=lambda task:
-            task["id"],
+            key=lambda task: task["id"],
             reverse=True
         )
 
     return jsonify(tasks)
 
 
-@app.get("/api/categories")
-def list_categories():
-    db = get_db()
+# --------------------------------------------------
+# Create task
+# --------------------------------------------------
 
-    rows = db.execute(
-        """
-        SELECT DISTINCT category
-        FROM tasks
-        WHERE category != ''
-        ORDER BY category
-        """
-    ).fetchall()
-
-    return jsonify(
-        [row["category"] for row in rows]
-    )
-
-
-@app.post("/api/tasks")
+@app.route("/api/tasks", methods=["POST"])
 def create_task():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-    title = (data.get("title") or "").strip()
+    title = (
+        data.get("title") or ""
+    ).strip()
 
     if not title:
-        return jsonify(
-            {"error": "title is required"}
-        ), 400
+        return jsonify({
+            "error": "title is required"
+        }), 400
 
     priority = data.get(
-        "priority", "medium"
+        "priority",
+        "medium"
     )
 
     if priority not in VALID_PRIORITIES:
         return jsonify({
             "error":
-            "priority must be one of low, medium, high"
+                "priority must be one of low, medium, high"
         }), 400
 
     category = (
@@ -238,33 +292,46 @@ def create_task():
         due_date = parse_due_date(
             data.get("due_date")
         )
-    except ValueError as e:
-        return jsonify(
-            {"error": str(e)}
-        ), 400
+    except ValueError as error:
+        return jsonify({
+            "error": str(error)
+        }), 400
 
     db = get_db()
 
-    cur = db.execute(
+    cursor = db.execute(
         """
-        INSERT INTO tasks
-        (title, done, priority, category, due_date, created_at)
-        VALUES (?, 0, ?, ?, ?, ?)
-        """,
-        (
+        INSERT INTO tasks (
             title,
+            done,
             priority,
             category,
             due_date,
-            datetime.now(timezone.utc).isoformat(),
-        ),
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            title,
+            0,
+            priority,
+            category,
+            due_date,
+            datetime.now(
+                timezone.utc
+            ).isoformat(),
+        )
     )
 
     db.commit()
 
     row = db.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (cur.lastrowid,),
+        """
+        SELECT *
+        FROM tasks
+        WHERE id = ?
+        """,
+        (cursor.lastrowid,)
     ).fetchone()
 
     return jsonify(
@@ -272,7 +339,14 @@ def create_task():
     ), 201
 
 
-@app.patch("/api/tasks/<int:task_id>")
+# --------------------------------------------------
+# Update task
+# --------------------------------------------------
+
+@app.route(
+    "/api/tasks/<int:task_id>",
+    methods=["PATCH"]
+)
 def update_task(task_id):
     data = request.get_json(
         silent=True
@@ -281,8 +355,12 @@ def update_task(task_id):
     db = get_db()
 
     row = db.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (task_id,),
+        """
+        SELECT *
+        FROM tasks
+        WHERE id = ?
+        """,
+        (task_id,)
     ).fetchone()
 
     if row is None:
@@ -291,8 +369,18 @@ def update_task(task_id):
         }), 404
 
     title = data.get(
-        "title", row["title"]
+        "title",
+        row["title"]
     )
+
+    title = (
+        title or ""
+    ).strip()
+
+    if not title:
+        return jsonify({
+            "error": "title is required"
+        }), 400
 
     done = data.get(
         "done",
@@ -307,7 +395,7 @@ def update_task(task_id):
     if priority not in VALID_PRIORITIES:
         return jsonify({
             "error":
-            "priority must be one of low, medium, high"
+                "priority must be one of low, medium, high"
         }), 400
 
     category = data.get(
@@ -315,22 +403,27 @@ def update_task(task_id):
         row["category"]
     )
 
+    category = (
+        category or ""
+    ).strip()
+
     if "due_date" in data:
         try:
             due_date = parse_due_date(
                 data.get("due_date")
             )
-        except ValueError as e:
-            return jsonify(
-                {"error": str(e)}
-            ), 400
+        except ValueError as error:
+            return jsonify({
+                "error": str(error)
+            }), 400
     else:
         due_date = row["due_date"]
 
     db.execute(
         """
         UPDATE tasks
-        SET title = ?,
+        SET
+            title = ?,
             done = ?,
             priority = ?,
             category = ?,
@@ -344,28 +437,43 @@ def update_task(task_id):
             category,
             due_date,
             task_id,
-        ),
+        )
     )
 
     db.commit()
 
-    row = db.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (task_id,),
+    updated_row = db.execute(
+        """
+        SELECT *
+        FROM tasks
+        WHERE id = ?
+        """,
+        (task_id,)
     ).fetchone()
 
     return jsonify(
-        row_to_task(row)
+        row_to_task(updated_row)
     )
 
 
-@app.delete("/api/tasks/<int:task_id>")
+# --------------------------------------------------
+# Delete task
+# --------------------------------------------------
+
+@app.route(
+    "/api/tasks/<int:task_id>",
+    methods=["DELETE"]
+)
 def delete_task(task_id):
     db = get_db()
 
     row = db.execute(
-        "SELECT * FROM tasks WHERE id = ?",
-        (task_id,),
+        """
+        SELECT *
+        FROM tasks
+        WHERE id = ?
+        """,
+        (task_id,)
     ).fetchone()
 
     if row is None:
@@ -374,8 +482,11 @@ def delete_task(task_id):
         }), 404
 
     db.execute(
-        "DELETE FROM tasks WHERE id = ?",
-        (task_id,),
+        """
+        DELETE FROM tasks
+        WHERE id = ?
+        """,
+        (task_id,)
     )
 
     db.commit()
@@ -383,13 +494,51 @@ def delete_task(task_id):
     return "", 204
 
 
+# --------------------------------------------------
+# Categories
+# --------------------------------------------------
+
+@app.route("/api/categories", methods=["GET"])
+def list_categories():
+    db = get_db()
+
+    rows = db.execute(
+        """
+        SELECT DISTINCT category
+        FROM tasks
+        WHERE category != ''
+        ORDER BY category
+        """
+    ).fetchall()
+
+    return jsonify([
+        row["category"]
+        for row in rows
+    ])
+
+
+# --------------------------------------------------
+# Initialize database
+# --------------------------------------------------
+
+init_db()
+
+
+# --------------------------------------------------
+# Local development
+# --------------------------------------------------
+
 if __name__ == "__main__":
-    init_db()
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
 
     app.run(
         host="0.0.0.0",
-        port=int(
-            os.environ.get("PORT", 5000)
-        ),
-        debug=False,
+        port=port,
+        debug=False
     )
+
